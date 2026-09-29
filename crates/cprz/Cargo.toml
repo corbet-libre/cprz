@@ -10,3 +10,13 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+cprz-blob = { version = "0.0.0", path = "../cprz-blob" }
+cprz-delta = { version = "0.0.0", path = "../cprz-delta" }
+cprz-image = { version = "0.0.0", path = "../cprz-image" }
+cprz-pad = { version = "0.0.0", path = "../cprz-pad" }
+cprz-text = { version = "0.0.0", path = "../cprz-text" }
+
+[dev-dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
