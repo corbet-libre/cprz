@@ -10,3 +10,7 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+brotli = "9"
+zstd = "0.14"
