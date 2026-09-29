@@ -8,5 +8,11 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[dependencies]
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+# nasm-free: ravif's default `asm` feature needs the NASM assembler, which CI
+# runners do not install; the pure-Rust fallback encodes the same AVIF.
+ravif = { version = "0.13", default-features = false, features = ["threading"] }
+
 [lints]
 workspace = true
