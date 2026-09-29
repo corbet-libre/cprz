@@ -1,6 +1,6 @@
 [package]
 name = "cprz-audio"
-description = "Voice and sound: Opus and neural speech codecs"
+description = "Voice and sound: Opus at low bitrates in an Ogg container over a pure-Rust codec"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,3 +10,7 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+ogg = "0.9"
+opus-rs = "0.1"
