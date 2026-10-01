@@ -43,8 +43,7 @@ fn quality_options(quantizer: usize) -> EncodeOptions {
 #[test]
 fn valid_webm_header() {
     let frames = rgb_frames(WIDTH, HEIGHT, FRAMES);
-    let out =
-        encode_rgb(&frames, WIDTH, HEIGHT, 30, 1, &quality_options(120)).expect("encodes");
+    let out = encode_rgb(&frames, WIDTH, HEIGHT, 30, 1, &quality_options(120)).expect("encodes");
     assert!(is_webm(&out.data));
     let info = probe(&out.data).expect("probes");
     assert_eq!(
@@ -69,10 +68,8 @@ fn frame_count_and_dimensions_preserved() {
 #[test]
 fn quality_affects_size() {
     let frames = rgb_frames(WIDTH, HEIGHT, FRAMES);
-    let high =
-        encode_rgb(&frames, WIDTH, HEIGHT, 30, 1, &quality_options(40)).expect("encodes");
-    let low =
-        encode_rgb(&frames, WIDTH, HEIGHT, 30, 1, &quality_options(220)).expect("encodes");
+    let high = encode_rgb(&frames, WIDTH, HEIGHT, 30, 1, &quality_options(40)).expect("encodes");
+    let low = encode_rgb(&frames, WIDTH, HEIGHT, 30, 1, &quality_options(220)).expect("encodes");
     assert!(is_webm(&high.data) && is_webm(&low.data));
     assert!(
         low.byte_size() < high.byte_size(),
@@ -136,8 +133,7 @@ fn slower_speed_compresses_at_least_as_well() {
         &EncodeOptions::quality(120, DEFAULT_SPEED),
     )
     .expect("encodes");
-    let fast =
-        encode_rgb(&frames, WIDTH, HEIGHT, 30, 1, &quality_options(120)).expect("encodes");
+    let fast = encode_rgb(&frames, WIDTH, HEIGHT, 30, 1, &quality_options(120)).expect("encodes");
     assert!(is_webm(&slow.data) && is_webm(&fast.data));
     assert!(
         slow.byte_size() <= fast.byte_size(),
@@ -272,8 +268,7 @@ fn is_webm_and_probe_reject_other_bytes() {
 #[test]
 fn probe_rejects_truncated_container() {
     let frames = rgb_frames(WIDTH, HEIGHT, FRAMES);
-    let out =
-        encode_rgb(&frames, WIDTH, HEIGHT, 30, 1, &quality_options(120)).expect("encodes");
+    let out = encode_rgb(&frames, WIDTH, HEIGHT, 30, 1, &quality_options(120)).expect("encodes");
     assert!(out.data.len() > 64);
     // A prefix cut inside the EBML header cannot parse.
     assert!(matches!(
