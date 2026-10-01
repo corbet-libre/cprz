@@ -11,12 +11,19 @@ publish.workspace = true
 [lints]
 workspace = true
 
-[dependencies]
-cprz-blob = { version = "0.0.0", path = "../cprz-blob" }
-cprz-delta = { version = "0.0.0", path = "../cprz-delta" }
-cprz-image = { version = "0.0.0", path = "../cprz-image" }
-cprz-pad = { version = "0.0.0", path = "../cprz-pad" }
-cprz-text = { version = "0.0.0", path = "../cprz-text" }
+[features]
+default = ["native"]
+native = ["cprz-blob/zstd", "dep:cprz-delta", "dep:cprz-image", "dep:cprz-pad", "dep:cprz-text"]
 
-[dev-dependencies]
+[dependencies]
+cprz-blob = { version = "0.0.0", path = "../cprz-blob", default-features = false }
+cprz-delta = { version = "0.0.0", path = "../cprz-delta", optional = true }
+cprz-image = { version = "0.0.0", path = "../cprz-image", optional = true }
+cprz-pad = { version = "0.0.0", path = "../cprz-pad", optional = true }
+cprz-text = { version = "0.0.0", path = "../cprz-text", optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 image = { version = "0.25", default-features = false, features = ["png"] }
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"

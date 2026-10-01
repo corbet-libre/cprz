@@ -61,3 +61,35 @@ Copyright 2026 Julian Y. Richard Corbet. Licensed under
 [LGPL-3.0-only](LICENSES/LGPL-3.0-only.txt)
 [WITH LGPL-3.0-linking-exception](LICENSES/LGPL-3.0-linking-exception.txt).
 See [LICENSE.md](LICENSE.md).
+
+## Continuous verification
+
+Dependency updates follow main and are tested against one CI-resolved lockfile.
+Line and branch coverage target 100%; failures remain blocking. See
+[the coverage contract](docs/COVERAGE.md) for measurement and exclusions.
+
+## Bounded portable records
+
+Device storage and transport use `cprz` with `default-features = false` and
+`cprz::portable::{compress, decompress}`. The decoder requires both encoded and
+decoded byte limits; oversize, truncated, concatenated and trailing data fail.
+It preserves exact bytes without image conversion, padding or encryption.
+Pipeline: compress, then Padme, then VLD0 encryption; reverse on receipt.
+
+The portable wire packet is codec byte `0x01` plus one RFC 7932 Brotli stream.
+It is deliberately a byte packet, not the legacy general CPRZ container. The
+maintained pure-Rust `brotli` dependency already used by cprz-text was selected
+for native/wasm portability. Existing zstd and image codecs remain available with
+default features; their legacy decoders are not bounded storage entry points.
+`brotlic`/`brotli2` require C FFI; zstd is retained for native workloads. No codec
+or cryptographic primitive is implemented here. Upstream API references:
+[Brotli streaming decoder](https://docs.rs/brotli/latest/brotli/fn.BrotliDecompressStream.html)
+and [strict decoder state](https://docs.rs/brotli-decompressor/latest/brotli_decompressor/struct.BrotliState.html).
+
+The strict upstream decoder disables large-window extensions. Output grows only
+after each at-most-4-KiB chunk fits the caller's output limit. The RFC permits up
+to 16 MiB decoder history; limits are not a whole-process memory/CPU quota.
+Quality 6 with a 1 MiB encoder window bounds routine device effort. CI executes
+identical hostile-input and round-trip vectors natively and in wasm. The legacy
+full workspace is native-only until its media/native-codec dependencies are
+ported; the portable facade explicitly excludes them.
