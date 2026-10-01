@@ -97,7 +97,7 @@ jobs:
     - name: Execute bounded exact-byte vectors on wasm32
       env:
         CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
-      run: cargo test --locked -p cprz -p cprz-blob --no-default-features --target wasm32-unknown-unknown --test portable
+      run: cargo test --locked -p cprz -p cprz-blob -p cprz-pad --no-default-features --target wasm32-unknown-unknown --test portable
     needs:
     - resolve
   dependency-policy:
@@ -142,11 +142,11 @@ jobs:
 
         cargo llvm-cov --version'
     - name: Measure real native round trips and failure paths
-      run: cargo llvm-cov --locked --workspace --all-features --branch --no-cfg-coverage --no-cfg-coverage-nightly --ignore-filename-regex '/tests/' --json --output-path coverage.json
+      run: cargo llvm-cov --locked --target x86_64-unknown-linux-gnu --workspace --all-features --branch --no-cfg-coverage --no-cfg-coverage-nightly --ignore-filename-regex '/tests/' --json --output-path coverage.json
     - name: Export exact line and branch locations
-      run: cargo llvm-cov report --locked --branch --ignore-filename-regex '/tests/' --lcov --output-path coverage.lcov
+      run: cargo llvm-cov report --locked --target x86_64-unknown-linux-gnu --branch --ignore-filename-regex '/tests/' --lcov --output-path coverage.lcov
     - name: Cross-check emitted line inventory independently
-      run: cargo llvm-cov report --locked --branch --ignore-filename-regex '/tests/' --text --output-path coverage.txt
+      run: cargo llvm-cov report --locked --target x86_64-unknown-linux-gnu --branch --ignore-filename-regex '/tests/' --text --output-path coverage.txt
     - name: Require complete line and branch coverage
       run: 'python3 .github/test-source-coverage.py
 

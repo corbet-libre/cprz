@@ -1,5 +1,129 @@
 use super::*;
 
+#[test]
+fn malformed_ebml_lengths_are_bounded_before_slicing() {
+    for input in [vec![], vec![0], vec![8], vec![0xA1, 0], vec![0xA1, 0x40]] {
+        assert!(read_element(&input, 0).is_none());
+    }
+    assert_eq!(read_uint(&[]), None);
+    assert_eq!(read_uint(&[1; 5]), None);
+    assert_eq!(read_uint(&[0, 0, 1, 0]), Some(256));
+    assert_eq!(child_end(usize::MAX, 1, None, usize::MAX), None);
+    assert_eq!(child_end(10, 1, None, 9), None);
+    assert_eq!(child_end(0, 2, Some(10), 5), None);
+    assert_eq!(child_end(1, 2, None, 5), Some(5));
+    for value in [0, 126, 127, 16_382, 16_383, (1u64 << 56) - 2] {
+        let mut bytes = vec![0xA1];
+        write_vint(&mut bytes, value);
+        assert_eq!(
+            read_element(&bytes, 0),
+            Some((0xA1, Some(value), bytes.len()))
+        );
+    }
+    for bytes in [
+        vec![0xEC, 0x80],
+        vec![0x1A, 0x45, 0xDF, 0xA3, 0xFF],
+        vec![0x1A, 0x45, 0xDF, 0xA3, 0x85, 0],
+    ] {
+        assert!(!is_webm(&bytes));
+        assert!(matches!(probe(&bytes), Err(Error::InvalidContainer(_))));
+    }
+}
+
+#[test]
+fn nested_metadata_parsers_reject_truncation_and_parent_overruns() {
+    for body in [vec![0], vec![0xAE, 0x84, 0]] {
+        assert!(parse_tracks(&body).is_err());
+        assert!(parse_track_entry(&body).is_err());
+        assert!(parse_video(&body).is_err());
+        assert!(count_cluster_frames(&body).is_err());
+        assert!(count_group_block(&body).is_err());
+    }
+    assert!(count_cluster_frames(&[0xA3, 0x83, 0, 0, 0]).is_err());
+    assert!(count_group_block(&[0xA1, 0x83, 0, 0, 0]).is_err());
+    assert_eq!(count_group_block(&[0xEC, 0x80]).unwrap(), 0);
+    assert_eq!(parse_tracks(&[0xEC, 0x80]).unwrap(), (None, None, false));
+    assert_eq!(
+        parse_track_entry(&[0x86, 0x83, b'V', b'P', b'9']).unwrap(),
+        (None, None, false)
+    );
+    assert_eq!(parse_video(&[0xEC, 0x80]).unwrap(), (None, None));
+    assert!(parse_video(&[0xB0, 0x80]).is_err());
+    assert!(parse_video(&[0xBA, 0x85, 0, 0, 0, 0, 1]).is_err());
+}
+
+#[test]
+fn a_real_av1_packet_is_counted_in_both_supported_webm_block_forms() {
+    fn body(data: &[u8], wanted: u32) -> &[u8] {
+        let mut offset = 0;
+        while offset < data.len() {
+            let (id, size, header) = read_element(data, offset).unwrap();
+            let end = child_end(offset, header, size, data.len()).unwrap();
+            if id == wanted {
+                return &data[offset + header..end];
+            }
+            offset = end;
+        }
+        panic!("encoded fixture is missing a required element")
+    }
+    let output = encode_rgb(&rgb_frames(32, 32, 1), 32, 32, 30, 1, &quality_options(120)).unwrap();
+    let segment = body(&output.data, 0x1853_8067);
+    let cluster = body(segment, 0x1F43_B675);
+    let packet = body(cluster, 0xA3);
+    let mut group = Vec::new();
+    master_element(&mut group, &[0xA1], packet);
+    master_element(&mut group, &[0xEC], &[]);
+    assert_eq!(count_group_block(&group).unwrap(), 1);
+    let mut replacement = Vec::new();
+    master_element(&mut replacement, &[0xA0], &group);
+    assert_eq!(count_cluster_frames(&replacement).unwrap(), 1);
+    assert_eq!(count_cluster_frames(cluster).unwrap(), 1);
+    let (_, ebml_size, ebml_header) = read_element(&output.data, 0).unwrap();
+    let mut finite = output.data[..ebml_header + sized(ebml_size.unwrap())].to_vec();
+    master_element(&mut finite, &[0x18, 0x53, 0x80, 0x67], segment);
+    assert_eq!(probe(&finite).unwrap(), probe(&output.data).unwrap());
+}
+
+#[test]
+fn independent_invalid_frame_fields_identify_the_actual_fault() {
+    for (width, height) in [(64, 0), (MAX_DIMENSION + 1, 64), (64, MAX_DIMENSION + 1)] {
+        let error = encode(
+            &Clip::new(width, height, 30, 1, vec![]),
+            &quality_options(120),
+        )
+        .unwrap_err();
+        assert!(matches!(error, Error::InvalidDimensions { .. }));
+        assert!(error.to_string().contains(&format!("{width}x{height}")));
+    }
+    let error = encode(&Clip::new(64, 64, 30, 0, vec![]), &quality_options(120)).unwrap_err();
+    assert!(matches!(error, Error::InvalidFps { num: 30, den: 0 }));
+    assert!(error.to_string().contains("30/0"));
+    for (u, v) in [(vec![0; 3], vec![0; 4]), (vec![0; 4], vec![0; 3])] {
+        let error = sample_frame(
+            &RawFrame::Yuv420 {
+                y: &[0; 16],
+                u: &u,
+                v: &v,
+            },
+            7,
+            4,
+            4,
+            2,
+            2,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            Error::FrameSizeMismatch {
+                index: 7,
+                expected: 4,
+                actual: 3
+            }
+        ));
+        assert!(error.to_string().contains('7'));
+    }
+}
+
 const WIDTH: u32 = 64;
 const HEIGHT: u32 = 64;
 const FRAMES: usize = 4;
@@ -275,4 +399,88 @@ fn probe_rejects_truncated_container() {
         probe(&out.data[..24]),
         Err(Error::InvalidContainer(_))
     ));
+}
+
+#[test]
+fn probe_rejects_malformed_declared_segments_and_missing_track_fields() {
+    fn element(id: &[u8], body: &[u8]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        master_element(&mut bytes, id, body);
+        bytes
+    }
+    fn container(body: &[u8]) -> Vec<u8> {
+        let mut bytes = element(&[0x1A, 0x45, 0xDF, 0xA3], &element(&[0x42, 0x82], b"webm"));
+        bytes.extend(body);
+        bytes
+    }
+    for bad_header in [vec![], vec![0], vec![0xEC, 0x84, 0], element(&[0xEC], &[])] {
+        let bytes = element(&[0x1A, 0x45, 0xDF, 0xA3], &bad_header);
+        assert!(!is_webm(&bytes));
+        assert!(
+            probe(&bytes)
+                .unwrap_err()
+                .to_string()
+                .contains("not a WebM")
+        );
+    }
+    assert!(
+        probe(&container(&element(&[0xEC], &[])))
+            .unwrap_err()
+            .to_string()
+            .contains("missing Segment")
+    );
+    let truncated = container(&[0x18, 0x53, 0x80, 0x67, 0x84, 0]);
+    assert!(
+        probe(&truncated)
+            .unwrap_err()
+            .to_string()
+            .contains("truncated Segment")
+    );
+    let overrun = container(&element(&[0x18, 0x53, 0x80, 0x67], &[0xEC, 0x84, 0]));
+    assert!(
+        probe(&overrun)
+            .unwrap_err()
+            .to_string()
+            .contains("overruns its parent")
+    );
+    for (codec, dimensions, expected) in [
+        ("V_VP9", vec![], "no AV1 video track"),
+        ("V_AV1", vec![], "misses dimensions"),
+        (
+            "V_AV1",
+            vec![0xB0, 0x81, 32, 0xBA, 0x81, 32],
+            "holds no frames",
+        ),
+    ] {
+        let mut track = element(&[0x86], codec.as_bytes());
+        track.extend(element(&[0xE0], &dimensions));
+        let tracks = element(&[0x16, 0x54, 0xAE, 0x6B], &element(&[0xAE], &track));
+        let segment = element(&[0x18, 0x53, 0x80, 0x67], &tracks);
+        let bytes = container(&segment);
+        assert!(is_webm(&bytes));
+        let error = probe(&bytes).unwrap_err();
+        assert!(error.to_string().contains(expected), "{error}");
+    }
+}
+
+#[test]
+fn video_configuration_failures_keep_the_actual_encoder_cause() {
+    let frames = rgb_frames(32, 32, 1);
+    for (options, expected) in [
+        (EncodeOptions::quality(QUANTIZER_MAX + 1, 10), "quantizer"),
+        (EncodeOptions::quality(120, SPEED_MAX + 1), "speed"),
+        (EncodeOptions::bitrate(0, 10), "bitrate"),
+        (EncodeOptions::bitrate(u32::MAX, 10), "bitrate"),
+    ] {
+        let error = encode_rgb(&frames, 32, 32, 30, 1, &options).unwrap_err();
+        assert!(error.to_string().contains(expected));
+    }
+    let empty = encode_rgb(&[], 32, 32, 30, 1, &quality_options(120)).unwrap_err();
+    assert!(empty.to_string().contains("no frames"));
+    let fps = encode_rgb(&frames, 32, 32, 0, 1, &quality_options(120)).unwrap_err();
+    assert!(fps.to_string().contains("0/1"));
+    // rav1e rejects video dimensions below 16; the facade preserves its cause.
+    let small = encode_rgb(&[vec![0; 3 * 16]], 1, 16, 30, 1, &quality_options(120)).unwrap_err();
+    assert!(matches!(small, Error::Encoder(_)));
+    assert!(small.to_string().contains("InvalidWidth"));
 }

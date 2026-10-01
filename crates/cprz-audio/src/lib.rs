@@ -316,11 +316,14 @@ pub fn decode_voice(packet: &[u8]) -> Result<VoiceData, Error> {
     if samples.is_empty() {
         return Err(Error::InvalidContainer);
     }
-    // Drop the encoder-delay samples the header asks us to skip (zero here).
-    let skip = (u32::from(pre_skip) * rate / 48_000) as usize;
-    if skip < samples.len() {
-        samples.drain(..skip);
+    // RFC 7845 sections 4.2/4.5: delay samples are not playable audio, and
+    // pre-skip cannot exceed the stream, including a partial output sample.
+    let available_scaled = (samples.len() as u64).saturating_mul(48_000);
+    if u64::from(pre_skip) * u64::from(rate) > available_scaled {
+        return Err(Error::InvalidContainer);
     }
+    let skip = (u32::from(pre_skip) * rate / 48_000) as usize;
+    samples.drain(..skip);
     Ok(VoiceData {
         sample_rate_hz: rate,
         samples,

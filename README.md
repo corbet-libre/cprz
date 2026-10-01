@@ -112,3 +112,12 @@ Quality 6 with a 1 MiB encoder window bounds routine device effort. CI executes
 identical hostile-input and round-trip vectors natively and in wasm. The legacy
 full workspace is native-only until its media/native-codec dependencies are
 ported; the portable facade explicitly excludes them.
+
+### Opus pre-skip boundary
+
+The audio decoder discards the complete requested prefix, including a prefix
+that spans all decoded samples. It rejects pre-skip beyond the available audio
+before rounding to the output rate. This corrects a real one-packet regression
+that previously returned all 320 decoded samples when 960 samples at 48 kHz meant
+to discard them all at 16 kHz. Real Opus/Ogg vectors cover zero, partial, complete
+and excessive prefixes. This follows [RFC 7845 sections 4.2 and 4.5](https://www.rfc-editor.org/rfc/rfc7845#section-4.2); it is not a claim of full Ogg conformance.

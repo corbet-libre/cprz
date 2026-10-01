@@ -2,6 +2,94 @@ use super::*;
 use image::{DynamicImage, ImageFormat, Rgb, RgbImage};
 use std::io::Cursor;
 
+fn framed(kind: Kind, codec: u8, body: &[u8]) -> Vec<u8> {
+    let mut bytes = MAGIC.to_vec();
+    bytes.extend([FORMAT_VERSION, kind.as_byte(), codec, 0]);
+    bytes.extend((body.len() as u32).to_be_bytes());
+    bytes.extend(body);
+    bytes
+}
+
+#[test]
+fn imported_containers_reject_corrupt_headers_and_nested_codec_bodies() {
+    let short = Packed::from_bytes(cprz_pad::pad(&MAGIC)).unwrap_err();
+    assert!(matches!(
+        short,
+        Error::Truncated {
+            expected: HEADER_LEN,
+            found: 4
+        }
+    ));
+    assert!(short.to_string().contains("need 12"));
+    let mut wrong = framed(Kind::Bytes, 0, &[0]);
+    wrong[0] ^= 1;
+    let padded = cprz_pad::pad(&wrong);
+    let bad_magic = Packed::from_bytes(padded).unwrap_err();
+    assert!(matches!(bad_magic, Error::BadMagic));
+    assert!(bad_magic.to_string().contains("magic"));
+    for kind in [Kind::Bytes, Kind::Image, Kind::Delta] {
+        let packed = Packed::from_bytes(framed(kind, 255, &[255])).unwrap();
+        let error = if kind == Kind::Delta {
+            expand_delta(b"base", &packed).unwrap_err()
+        } else {
+            expand(&packed).unwrap_err()
+        };
+        assert!(matches!(error, Error::UnknownCodec { codec: 255, .. }));
+        assert!(error.to_string().contains("0xFF"));
+    }
+    for (body, expected) in [
+        (vec![0; 4], "truncated"),
+        (vec![0, 0, 0, 1, 1], "disagrees"),
+        (vec![0, 0, 0, 1, 0], "AVIF"),
+    ] {
+        let packed = Packed::from_bytes(framed(Kind::Image, 0, &body)).unwrap();
+        assert!(expand(&packed).unwrap_err().to_string().contains(expected));
+    }
+    let packed = shrink(Payload::Bytes(b"data".to_vec()), Goal::smallest()).unwrap();
+    assert!(!packed.is_empty());
+    let recovered = Packed::from_bytes(packed.clone().into_bytes()).unwrap();
+    assert_eq!(
+        expand(&recovered).unwrap(),
+        Payload::Bytes(b"data".to_vec())
+    );
+    assert_eq!(recovered.as_bytes(), packed.as_bytes());
+}
+
+#[test]
+fn invalid_image_configuration_and_nested_errors_keep_actionable_causes() {
+    use std::error::Error as _;
+    let input = ImageInput {
+        data: blocks_png(8, 8),
+        max_dim: 0,
+    };
+    let error = shrink(Payload::Image(input), Goal::smallest()).unwrap_err();
+    assert!(matches!(
+        error,
+        Error::Image(cprz_image::Error::InvalidMaxDimension)
+    ));
+    assert!(error.to_string().contains("image codec"));
+    assert!(error.source().is_some());
+    let input = ImageInput {
+        data: blocks_png(8, 8),
+        max_dim: 8,
+    };
+    let error = encode_image(&input, Some(HEADER_LEN)).unwrap_err();
+    assert!(matches!(
+        error,
+        Error::DoesNotFit {
+            budget: HEADER_LEN,
+            ..
+        }
+    ));
+    assert!(error.to_string().contains("budget"));
+    assert!(error.source().is_none());
+    let packet = Packed::from_bytes(framed(Kind::Bytes, 0, &[0, 1, 2])).unwrap();
+    let error = expand(&packet).unwrap_err();
+    assert!(matches!(error, Error::Blob(_)));
+    assert!(error.to_string().contains("blob codec"));
+    assert!(error.source().unwrap().source().is_some());
+}
+
 /// Technical paragraph repeated like log output.
 const PARAGRAPH: &str = "Packet switching splits each message into small blocks that travel \
     independently across the network and are reassembled at the destination. Sequence numbers \
@@ -300,4 +388,91 @@ fn kind_bytes_are_stable() {
     assert_eq!(Kind::Video.as_byte(), 0x11);
     assert_eq!(Kind::Structured.as_byte(), 0x20);
     assert_eq!(Kind::from_byte(0x09), None);
+}
+
+#[test]
+fn container_diagnostics_preserve_exact_parse_and_nested_codec_failures() {
+    use std::error::Error as _;
+    for (offset, value, expected) in [
+        (4, 127, "version 127"),
+        (5, 9, "kind 0x09"),
+        (7, 2, "flags 0x02"),
+    ] {
+        let mut input = framed(Kind::Bytes, 0, &[0]);
+        input[offset] = value;
+        let error = Packed::from_bytes(input).unwrap_err();
+        assert!(error.to_string().contains(expected));
+        assert!(error.source().is_none());
+    }
+    let mut extra = framed(Kind::Bytes, 0, &[0]);
+    extra.push(0);
+    assert!(
+        Packed::from_bytes(extra)
+            .unwrap_err()
+            .to_string()
+            .contains("1 trailing")
+    );
+    assert!(
+        Packed::from_bytes(vec![])
+            .unwrap_err()
+            .to_string()
+            .contains("empty")
+    );
+    let padding = Packed::from_bytes(vec![255; 8]).unwrap_err();
+    assert!(padding.to_string().contains("padded framing"));
+    assert!(padding.source().is_some());
+    for (kind, expected) in [
+        (Kind::Audio, "audio"),
+        (Kind::Video, "video"),
+        (Kind::Structured, "structured"),
+    ] {
+        let packed = Packed::from_bytes(framed(kind, 0, &[0])).unwrap();
+        assert_eq!(packed.kind().unwrap(), kind);
+        assert!(expand(&packed).unwrap_err().to_string().contains(expected));
+    }
+    let text = shrink(Payload::Text("known text".into()), Goal::smallest()).unwrap();
+    assert_eq!(text.as_ref(), text.as_bytes());
+    let not_delta = expand_delta(b"base", &text).unwrap_err();
+    assert!(not_delta.to_string().contains("found text"));
+    for (kind, codec, expected) in [
+        (Kind::Text, 0, "text codec"),
+        (Kind::Delta, cprz_delta::MODE_FULL, "delta codec"),
+    ] {
+        let packed = Packed::from_bytes(framed(kind, codec, &[codec, 1, 2])).unwrap();
+        let error = if kind == Kind::Delta {
+            expand_delta(b"base", &packed).unwrap_err()
+        } else {
+            expand(&packed).unwrap_err()
+        };
+        assert!(error.to_string().contains(expected));
+        assert!(error.source().is_some());
+    }
+    let delta = shrink(
+        Payload::Delta {
+            old: b"old".to_vec(),
+            new: b"new".to_vec(),
+        },
+        Goal::smallest(),
+    )
+    .unwrap();
+    assert!(
+        expand(&delta)
+            .unwrap_err()
+            .to_string()
+            .contains("needs its base")
+    );
+    let bad_image = shrink(
+        Payload::Image(ImageInput {
+            data: b"not an image".to_vec(),
+            max_dim: 8,
+        }),
+        Goal::smallest(),
+    )
+    .unwrap_err();
+    assert!(bad_image.source().unwrap().source().is_some());
+    // A public error value can be displayed without allocating the rejected body.
+    let too_large = Error::TooLarge {
+        bytes: u32::MAX as usize,
+    };
+    assert!(too_large.to_string().contains("length field"));
 }

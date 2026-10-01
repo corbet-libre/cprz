@@ -96,3 +96,17 @@ fn malformed_packets_are_errors() {
     let truncated = &packet[..packet.len() / 2];
     assert!(decompress(truncated).is_err());
 }
+
+#[test]
+fn malformed_packet_diagnostics_preserve_codec_and_cause() {
+    use std::error::Error as _;
+    for (packet, expected, cause) in [
+        (vec![], "empty", false),
+        (vec![255], "0xFF", false),
+        (vec![HEADER_ZSTD, 1, 2, 3], "zstd", true),
+    ] {
+        let error = decompress(&packet).unwrap_err();
+        assert!(error.to_string().contains(expected));
+        assert_eq!(error.source().is_some(), cause);
+    }
+}

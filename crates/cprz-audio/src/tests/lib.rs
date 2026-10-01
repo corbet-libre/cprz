@@ -1,5 +1,103 @@
 use super::*;
 
+#[test]
+fn real_opus_preskip_discards_the_entire_prefix_and_rejects_impossible_length() {
+    // RFC 7845 sections 4.2 and 4.5: encoder-delay samples are not audio;
+    // the final granule position cannot be below pre-skip.
+    let encoded = encode_voice(&vec![1000; 320], VoiceConfig::default()).unwrap();
+    let mut reader = PacketReader::new(Cursor::new(encoded));
+    let head = reader.read_packet().unwrap().unwrap().data;
+    let tags = reader.read_packet().unwrap().unwrap().data;
+    let audio = reader.read_packet().unwrap().unwrap().data;
+    assert!(reader.read_packet().unwrap().is_none());
+    for skip in [0u16, 480, 960, 961, 963] {
+        let mut head = head.clone();
+        head[10..12].copy_from_slice(&skip.to_le_bytes());
+        let mut writer = PacketWriter::new(Vec::new());
+        writer
+            .write_packet(&head[..], STREAM_SERIAL, PacketWriteEndInfo::EndPage, 0)
+            .unwrap();
+        writer
+            .write_packet(&tags[..], STREAM_SERIAL, PacketWriteEndInfo::EndPage, 0)
+            .unwrap();
+        writer
+            .write_packet(
+                &audio[..],
+                STREAM_SERIAL,
+                PacketWriteEndInfo::EndStream,
+                960,
+            )
+            .unwrap();
+        let result = decode_voice(&writer.into_inner());
+        if skip > 960 {
+            assert!(matches!(result, Err(Error::InvalidContainer)));
+        } else {
+            assert_eq!(
+                result.unwrap().samples.len(),
+                320 - usize::from(skip) / 3,
+                "pre-skip {skip}"
+            );
+        }
+    }
+}
+
+#[test]
+fn maintained_ogg_framing_preserves_rejection_of_invalid_opus_headers() {
+    fn stream(head: &[u8], tags: &[u8], audio: Option<&[u8]>) -> Vec<u8> {
+        let mut writer = PacketWriter::new(Vec::new());
+        writer
+            .write_packet(head, STREAM_SERIAL, PacketWriteEndInfo::EndPage, 0)
+            .unwrap();
+        writer
+            .write_packet(tags, STREAM_SERIAL, PacketWriteEndInfo::EndPage, 0)
+            .unwrap();
+        if let Some(audio) = audio {
+            writer
+                .write_packet(audio, STREAM_SERIAL, PacketWriteEndInfo::EndStream, 960)
+                .unwrap();
+        }
+        writer.into_inner()
+    }
+    let config = VoiceConfig::default();
+    assert_eq!(config.sample_rate_hz(), 16_000);
+    assert_eq!(config.bitrate_bps(), 12_000);
+    let head = opus_head(config.sample_rate_hz());
+    let tags = opus_tags();
+    for offset in [0, 8, 9, 18] {
+        let mut invalid = head;
+        invalid[offset] ^= 2;
+        let error = decode_voice(&stream(&invalid, &tags, None)).unwrap_err();
+        assert!(matches!(error, Error::InvalidContainer));
+        assert!(error.to_string().contains("Ogg Opus"));
+    }
+    assert!(matches!(
+        decode_voice(&stream(&head[..18], &tags, None)),
+        Err(Error::InvalidContainer)
+    ));
+    assert!(matches!(
+        decode_voice(&stream(&opus_head(44_100), &tags, None)),
+        Err(Error::UnsupportedSampleRate(44_100))
+    ));
+    for tags in [b"short".as_slice(), b"OtherTag".as_slice()] {
+        assert!(matches!(
+            decode_voice(&stream(&head, tags, None)),
+            Err(Error::InvalidContainer)
+        ));
+    }
+    assert!(matches!(
+        decode_voice(&stream(&head, &tags, None)),
+        Err(Error::InvalidContainer)
+    ));
+    assert!(matches!(
+        decode_voice(&stream(&head, &tags, Some(&[]))),
+        Err(Error::InvalidContainer)
+    ));
+    let mut empty_reader = PacketReader::new(Cursor::new(stream(&head, &tags, None)));
+    assert!(empty_reader.read_packet().unwrap().is_some());
+    assert!(empty_reader.read_packet().unwrap().is_some());
+    assert!(empty_reader.read_packet().unwrap().is_none());
+}
+
 /// Two-second-friendly voice-like signal: mixed sines at the given rate.
 fn tone(sample_rate_hz: u32, seconds: u32, amplitude: f32) -> Vec<i16> {
     let total = (sample_rate_hz * seconds) as usize;
@@ -146,4 +244,58 @@ fn invalid_input_is_rejected() {
         decode_voice(&packet),
         Err(Error::InvalidContainer)
     ));
+}
+
+#[test]
+fn audio_failures_identify_configuration_container_and_upstream_causes() {
+    use std::{error::Error as _, io::Read as _};
+    for (error, expected) in [
+        (decode_voice(&[]).unwrap_err(), "no audio"),
+        (VoiceConfig::new(44_100, 12_000).unwrap_err(), "44100"),
+        (VoiceConfig::new(16_000, 1).unwrap_err(), "bitrate 1"),
+    ] {
+        assert!(error.to_string().contains(expected));
+        assert!(error.source().is_none());
+    }
+    let head = opus_head(16_000);
+    let tags = opus_tags();
+    let mut writer = PacketWriter::new(Vec::new());
+    writer
+        .write_packet(&head[..], STREAM_SERIAL, PacketWriteEndInfo::EndPage, 0)
+        .unwrap();
+    writer
+        .write_packet(&tags[..], STREAM_SERIAL, PacketWriteEndInfo::EndPage, 0)
+        .unwrap();
+    writer
+        .write_packet(
+            &[255][..],
+            STREAM_SERIAL,
+            PacketWriteEndInfo::EndStream,
+            960,
+        )
+        .unwrap();
+    let error = decode_voice(&writer.into_inner()).unwrap_err();
+    assert!(matches!(error, Error::Codec(_)));
+    assert!(error.to_string().contains("opus codec"));
+    assert!(error.source().is_none());
+    let mut packet = encode_voice(&vec![1000; 320], VoiceConfig::default()).unwrap();
+    let second_page = packet
+        .windows(4)
+        .enumerate()
+        .filter(|(_, part)| *part == b"OggS")
+        .nth(1)
+        .unwrap()
+        .0;
+    packet[second_page + 22] ^= 1;
+    assert!(matches!(
+        decode_voice(&packet),
+        Err(Error::InvalidContainer)
+    ));
+    // Error::Io is public; retain a genuine standard-library short-read cause.
+    let error = Error::Io(Cursor::new([1, 2]).read_exact(&mut [0; 3]).unwrap_err());
+    assert!(error.to_string().contains("container I/O"));
+    assert_eq!(
+        error.source().unwrap().to_string(),
+        "failed to fill whole buffer"
+    );
 }

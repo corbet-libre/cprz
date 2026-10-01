@@ -159,3 +159,32 @@ fn huge_lengths_saturate_instead_of_wrapping() {
     assert_eq!(padded_len(usize::MAX), usize::MAX);
     assert_eq!(fixed::padded_len(usize::MAX), usize::MAX);
 }
+
+#[test]
+fn framing_diagnostics_and_overhead_match_actual_outputs() {
+    assert!(
+        unpad(&[])
+            .unwrap_err()
+            .to_string()
+            .contains("length prefix")
+    );
+    let invalid = unpad(&5u64.to_be_bytes()).unwrap_err();
+    assert!(invalid.to_string().contains("5"));
+    assert!(invalid.to_string().contains("0 bytes"));
+    let mut tampered = pad(b"hello");
+    *tampered.last_mut().unwrap() = 255;
+    assert!(
+        unpad(&tampered)
+            .unwrap_err()
+            .to_string()
+            .contains("non-zero")
+    );
+    for len in sample_lengths() {
+        let data = pattern(len);
+        assert_eq!(super::padding_len(len), pad(&data).len() - data.len());
+        assert_eq!(
+            fixed::padding_len(len),
+            fixed::pad(&data).len() - data.len()
+        );
+    }
+}

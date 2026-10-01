@@ -110,3 +110,17 @@ fn rejects_malformed_deltas() {
     let wrong_old = pseudo_random(old.len(), 0x5EED);
     assert!(matches!(apply(&wrong_old, &delta), Err(Error::Decode(_))));
 }
+
+#[test]
+fn malformed_delta_diagnostics_preserve_mode_and_upstream_cause() {
+    use std::error::Error as _;
+    for (packet, expected, cause) in [
+        (vec![], "empty", false),
+        (vec![255], "255", false),
+        (vec![MODE_FULL, 1, 2, 3], "decode", true),
+    ] {
+        let error = apply(b"base", &packet).unwrap_err();
+        assert!(error.to_string().contains(expected));
+        assert_eq!(error.source().is_some(), cause);
+    }
+}

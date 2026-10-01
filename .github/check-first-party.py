@@ -37,6 +37,12 @@ def check_manifest(value):
             check_manifest(item)
 
 
+def check_layout(paths):
+    # A downloaded resolver artifact cannot substitute for the committed input.
+    if 'Cargo.toml' in paths and 'Cargo.lock' not in paths:
+        raise ValueError('Root Cargo workspace requires a committed Cargo.lock')
+
+
 def rejects(function, value):
     try:
         function(value)
@@ -46,6 +52,10 @@ def rejects(function, value):
 
 
 def self_test():
+    check_layout(['Cargo.toml', 'Cargo.lock'])
+    check_layout([])
+    rejects(check_layout, ['Cargo.toml'])
+    rejects(check_layout, ['Cargo.toml', 'nested/Cargo.lock'])
     repo = 'https://github.com/corbet-foss/example'
     source = 'git+' + repo + '?branch=main#' + 'a' * 40
     package = {'name': 'example', 'source': source}
@@ -72,6 +82,7 @@ if __name__ == '__main__':
     self_test()
     if '--self-test' not in sys.argv:
         paths = subprocess.check_output(['git', 'ls-files', '-z'], text=True).split('\0')
+        check_layout(paths)
         for name in paths:
             path = Path(name)
             if path.name == 'Cargo.toml':

@@ -1,0 +1,146 @@
+[
+  {
+    "file": "crates/cprz-pad/src/lib.rs",
+    "line": 148,
+    "source": "declared,",
+    "target": "native",
+    "reason": "The explicitly measured x86_64 target has 64-bit usize, so converting u64 to usize cannot fail; oversized prefixes are executed separately on actual wasm32.",
+    "evidence": "docs/COVERAGE.md#proposed-native-exceptions",
+    "evidence_sources": {
+      "crates/cprz-pad/src/lib.rs": "64b0291ce4f249f7e78c9a625332f4d8296d765c30283d55052c1933306a3c03",
+      ".github/workflows/ci.yml": "d54fe51d4b31824070277610df59b892feb7e37e41782aec43d983ae00168ca4"
+    }
+  },
+  {
+    "file": "crates/cprz-pad/src/lib.rs",
+    "line": 149,
+    "source": "available,",
+    "target": "native",
+    "reason": "The explicitly measured x86_64 target has 64-bit usize, so converting u64 to usize cannot fail; oversized prefixes are executed separately on actual wasm32.",
+    "evidence": "docs/COVERAGE.md#proposed-native-exceptions",
+    "evidence_sources": {
+      "crates/cprz-pad/src/lib.rs": "64b0291ce4f249f7e78c9a625332f4d8296d765c30283d55052c1933306a3c03",
+      ".github/workflows/ci.yml": "d54fe51d4b31824070277610df59b892feb7e37e41782aec43d983ae00168ca4"
+    }
+  },
+  {
+    "file": "crates/cprz-pad/src/lib.rs",
+    "line": 150,
+    "source": "})?;",
+    "target": "native",
+    "reason": "The explicitly measured x86_64 target has 64-bit usize, so converting u64 to usize cannot fail; oversized prefixes are executed separately on actual wasm32.",
+    "evidence": "docs/COVERAGE.md#proposed-native-exceptions",
+    "evidence_sources": {
+      "crates/cprz-pad/src/lib.rs": "64b0291ce4f249f7e78c9a625332f4d8296d765c30283d55052c1933306a3c03",
+      ".github/workflows/ci.yml": "d54fe51d4b31824070277610df59b892feb7e37e41782aec43d983ae00168ca4"
+    }
+  },
+  {
+    "file": "crates/cprz-video/src/lib.rs",
+    "line": 530,
+    "source": "return false;",
+    "target": "native",
+    "reason": "Finite EBML sizes are at most 2^56-2 and headers at most 12 bytes; these top-level sums cannot overflow 64-bit usize.",
+    "evidence": "docs/COVERAGE.md#proposed-native-exceptions",
+    "evidence_sources": {
+      "crates/cprz-video/src/lib.rs": "a651a192521e0d4eec27b3ae719008df41638394ae3e7dc5619f4819e518d4fc",
+      ".github/workflows/ci.yml": "d54fe51d4b31824070277610df59b892feb7e37e41782aec43d983ae00168ca4"
+    }
+  },
+  {
+    "file": "crates/cprz-video/src/lib.rs",
+    "line": 566,
+    "source": ".ok_or_else(|| invalid(\"EBML header overruns input\"))?;",
+    "target": "native",
+    "reason": "Finite EBML sizes are at most 2^56-2 and headers at most 12 bytes; these top-level sums cannot overflow 64-bit usize.",
+    "evidence": "docs/COVERAGE.md#proposed-native-exceptions",
+    "evidence_sources": {
+      "crates/cprz-video/src/lib.rs": "a651a192521e0d4eec27b3ae719008df41638394ae3e7dc5619f4819e518d4fc",
+      ".github/workflows/ci.yml": "d54fe51d4b31824070277610df59b892feb7e37e41782aec43d983ae00168ca4"
+    }
+  },
+  {
+    "file": "crates/cprz-video/src/lib.rs",
+    "line": 579,
+    "source": ".ok_or_else(|| invalid(\"Segment overruns input\"))?,",
+    "target": "native",
+    "reason": "Finite EBML sizes are at most 2^56-2 and headers at most 12 bytes; these top-level sums cannot overflow 64-bit usize.",
+    "evidence": "docs/COVERAGE.md#proposed-native-exceptions",
+    "evidence_sources": {
+      "crates/cprz-video/src/lib.rs": "a651a192521e0d4eec27b3ae719008df41638394ae3e7dc5619f4819e518d4fc",
+      ".github/workflows/ci.yml": "d54fe51d4b31824070277610df59b892feb7e37e41782aec43d983ae00168ca4"
+    }
+  },
+  {
+    "file": "crates/cprz-video/src/lib.rs",
+    "line": 529,
+    "source": "let Some(end) = header_len.checked_add(sized(size)) else {",
+    "target": "native",
+    "reason": "Finite EBML header size plus at most 12 bytes cannot overflow the explicitly measured 64-bit target.",
+    "evidence": "docs/COVERAGE.md#proposed-native-exceptions",
+    "evidence_sources": {
+      "crates/cprz-video/src/lib.rs": "a651a192521e0d4eec27b3ae719008df41638394ae3e7dc5619f4819e518d4fc",
+      ".github/workflows/ci.yml": "d54fe51d4b31824070277610df59b892feb7e37e41782aec43d983ae00168ca4"
+    },
+    "branch": {
+      "block": 0,
+      "id": 1
+    }
+  },
+  {
+    "file": "crates/cprz-video/src/lib.rs",
+    "line": 399,
+    "source": "return Err(Error::Encoder(format!(\"encoding failed: {error:?}\")));",
+    "target": "native",
+    "reason": "The bound upstream single-pass encoder cannot be NotReady; its other unhandled receive failure requires failing writes to its private Vec buffer.",
+    "evidence": "docs/COVERAGE.md#proposed-native-exceptions",
+    "evidence_sources": {
+      "crates/cprz-video/src/lib.rs": "a651a192521e0d4eec27b3ae719008df41638394ae3e7dc5619f4819e518d4fc",
+      ".github/workflows/ci.yml": "d54fe51d4b31824070277610df59b892feb7e37e41782aec43d983ae00168ca4",
+      "Cargo.lock": "a41ed2af07e7a31cff919425d7bcb7eef533222cce1d4cf8cbd447541215dc35"
+    }
+  },
+  {
+    "file": "crates/cprz-video/src/lib.rs",
+    "line": 404,
+    "source": "return Err(Error::Encoder(\"encoder produced no packets\".to_owned()));",
+    "target": "native",
+    "reason": "A nonempty clip supplies frame zero as a shown keyframe; upstream produces its packet before either limit-completion condition can hold.",
+    "evidence": "docs/COVERAGE.md#proposed-native-exceptions",
+    "evidence_sources": {
+      "crates/cprz-video/src/lib.rs": "a651a192521e0d4eec27b3ae719008df41638394ae3e7dc5619f4819e518d4fc",
+      ".github/workflows/ci.yml": "d54fe51d4b31824070277610df59b892feb7e37e41782aec43d983ae00168ca4",
+      "Cargo.lock": "a41ed2af07e7a31cff919425d7bcb7eef533222cce1d4cf8cbd447541215dc35"
+    }
+  },
+  {
+    "file": "crates/cprz-video/src/lib.rs",
+    "line": 403,
+    "source": "if packets.is_empty() {",
+    "target": "native",
+    "reason": "The immutable upstream single-pass configuration emits the first shown keyframe before reporting completion for a nonempty clip.",
+    "evidence": "docs/COVERAGE.md#proposed-native-exceptions",
+    "evidence_sources": {
+      "crates/cprz-video/src/lib.rs": "a651a192521e0d4eec27b3ae719008df41638394ae3e7dc5619f4819e518d4fc",
+      ".github/workflows/ci.yml": "d54fe51d4b31824070277610df59b892feb7e37e41782aec43d983ae00168ca4",
+      "Cargo.lock": "a41ed2af07e7a31cff919425d7bcb7eef533222cce1d4cf8cbd447541215dc35"
+    },
+    "branch": {
+      "block": 0,
+      "id": 0
+    }
+  },
+  {
+    "file": "crates/cprz-video/src/lib.rs",
+    "line": 387,
+    "source": ".map_err(|error| Error::Encoder(format!(\"cannot send frame {index}: {error:?}\")))?;",
+    "target": "native",
+    "reason": "Resource-scale exception proposal: upstream refuses a new frame after at least 2^31 actual submissions; this extreme failure is not qualified by bounded CI.",
+    "evidence": "docs/COVERAGE.md#proposed-native-exceptions",
+    "evidence_sources": {
+      "crates/cprz-video/src/lib.rs": "a651a192521e0d4eec27b3ae719008df41638394ae3e7dc5619f4819e518d4fc",
+      ".github/workflows/ci.yml": "d54fe51d4b31824070277610df59b892feb7e37e41782aec43d983ae00168ca4",
+      "Cargo.lock": "a41ed2af07e7a31cff919425d7bcb7eef533222cce1d4cf8cbd447541215dc35"
+    }
+  }
+]

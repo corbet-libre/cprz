@@ -156,3 +156,18 @@ fn malformed_packets_are_errors() {
     let truncated = &zstd_packet[..zstd_packet.len() / 2];
     assert!(unpack::<Vec<Profile>>(truncated).is_err());
 }
+
+#[test]
+fn malformed_structured_data_keeps_the_failed_codec_in_its_diagnostics() {
+    use std::error::Error as _;
+    for (packet, expected, cause) in [
+        (vec![], "empty", false),
+        (vec![255], "0xFF", false),
+        (vec![HEADER_RAW], "bitcode", true),
+        (vec![HEADER_ZSTD, 1, 2, 3], "zstd", true),
+    ] {
+        let error = unpack::<Profile>(&packet).unwrap_err();
+        assert!(error.to_string().contains(expected));
+        assert_eq!(error.source().is_some(), cause);
+    }
+}

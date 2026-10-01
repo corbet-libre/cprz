@@ -1,4 +1,25 @@
 use super::*;
+
+#[test]
+fn degenerate_dimensions_and_extreme_budgets_preserve_resize_contracts() {
+    for dimensions in [(0, 10, 10), (10, 0, 10), (10, 10, 0)] {
+        assert_eq!(
+            resized_dimensions(dimensions.0, dimensions.1, dimensions.2),
+            (0, 0)
+        );
+    }
+    assert!(!is_avif(b"\0\0\0\x0cftypjpeg"));
+    assert!(!is_avif(b"\0\0\0\x0cotheravif"));
+    let input = encode_input(&gradient(8, 8), ImageFormat::Png);
+    let generous = encode_avif_to_size(&input, 8, 1_000_000, 10).unwrap();
+    assert!(is_avif(&generous.data));
+    let impossible = encode_avif_to_size(&input, 8, 1, 10).unwrap();
+    assert!(impossible.data.len() > 1);
+    assert_eq!(
+        (generous.width, generous.height),
+        (impossible.width, impossible.height)
+    );
+}
 use image::{DynamicImage, ImageFormat, Rgb, RgbImage};
 use std::io::Cursor;
 
@@ -130,4 +151,56 @@ fn is_avif_rejects_other_bytes() {
     assert!(!is_avif(&png));
     assert!(!is_avif(&[]));
     assert!(!is_avif(b"ftyp"));
+}
+
+#[test]
+fn image_failure_diagnostics_retain_decode_causes_and_invalid_parameters() {
+    use std::error::Error as _;
+    let input = encode_input(&gradient(8, 8), ImageFormat::Png);
+    for (error, expected, nested) in [
+        (
+            encode_avif(b"not an image", 8, 50.0, 10).unwrap_err(),
+            "decode",
+            true,
+        ),
+        (
+            encode_avif(&input, 8, 0.0, 10).unwrap_err(),
+            "quality",
+            false,
+        ),
+        (encode_avif(&input, 8, 50.0, 0).unwrap_err(), "speed", false),
+        (
+            encode_avif_to_size(&input, 8, 0, 10).unwrap_err(),
+            "target byte size",
+            false,
+        ),
+    ] {
+        assert!(error.to_string().contains(expected));
+        assert_eq!(error.source().is_some(), nested);
+    }
+}
+
+#[test]
+fn a_real_upstream_avif_refusal_preserves_its_diagnostic_through_conversion() {
+    use std::error::Error as _;
+    // ravif's raw-plane API rejects a short iterator before encoding a frame.
+    let upstream = match ravif::Encoder::new()
+        .with_speed(10)
+        .encode_raw_planes_8_bit(
+            8,
+            8,
+            std::iter::empty::<[u8; 3]>(),
+            None::<Vec<u8>>,
+            ravif::PixelRange::Full,
+            ravif::MatrixCoefficients::Identity,
+        ) {
+        Err(error) => error,
+        Ok(_) => panic!("short raw frame must fail"),
+    };
+    assert!(matches!(upstream, ravif::Error::TooFewPixels));
+    let original = upstream.to_string();
+    let error = Error::from(upstream);
+    assert!(matches!(error, Error::Encode(_)));
+    assert!(error.to_string().contains(&original));
+    assert!(error.source().is_none());
 }
