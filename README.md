@@ -14,6 +14,25 @@ decoding stays fast.
 
 Status: early development. Interfaces may change.
 
+## Scope
+
+Home: `cmsg` → `cbrd` → `cprz`, reused by profile publication and Vault's
+record owners. This workspace wraps maintained codecs for structured records,
+text, blobs, images, audio, video and deltas; its padding sublibrary supplies
+Padmé size classes. All crates, including the facade, retain the explicit LGPL
+linking-exception licence.
+
+The data owner compresses and pads before handing bytes to Records for VLD0
+encryption. Records remains byte-compatible with Veilid. Compression owns no
+keys, network, encryption, stream framing or server-side compression service.
+Dictionaries use public data only. Profile pictures remain outside the launch
+product despite this reusable library's image codecs.
+
+Native and actual wasm vectors must preserve exact signed bytes and reject
+oversized, truncated, concatenated, trailing and unknown-codec input. The portable
+path below satisfies the bounded device interface; the legacy codec workspace
+has separate native coverage debt and is not certified by portable-path results.
+
 ## Layout
 
 One repository, one version (Cargo workspace). The facade chooses; the
