@@ -16,22 +16,36 @@ Status: early development. Interfaces may change.
 
 ## Scope
 
-Home: `cmsg` → `cbrd` → `cprz`, reused by profile publication and Vault's
-record owners. This workspace wraps maintained codecs for structured records,
-text, blobs, images, audio, video and deltas; its padding sublibrary supplies
-Padmé size classes. All crates, including the facade, retain the explicit LGPL
-linking-exception licence.
+### Purpose
 
-The data owner compresses and pads before handing bytes to Records for VLD0
-encryption. Records remains byte-compatible with Veilid. Compression owns no
-keys, network, encryption, stream framing or server-side compression service.
-Dictionaries use public data only. Profile pictures remain outside the launch
-product despite this reusable library's image codecs.
+`cprz` shrinks every payload as far as possible with established technologies and pads it to a privacy-preserving size class before the caller encrypts.
 
-Native and actual wasm vectors must preserve exact signed bytes and reject
-oversized, truncated, concatenated, trailing and unknown-codec input. The portable
-path below satisfies the bounded device interface; the legacy codec workspace
-has separate native coverage debt and is not certified by portable-path results.
+### Owns
+
+Home `cmsg` → `cbrd` → `cprz`, reused by Profile and by vault record packing. The facade `shrink`/`expand`, target profiles as data (for example `veilid-message` 32 KB), a self-describing container, and a bounded portable path for device storage and transport; the facade chooses and the sublibraries below execute.
+
+| Crate | Job |
+|---|---|
+| `cprz-structured` | Records and messages: schema bit-packing, Cap'n Proto where needed |
+| `cprz-text` | Text: zstd with public dictionaries, Brotli 11 |
+| `cprz-blob` | Other bytes: zstd long-distance |
+| `cprz-image` | Resize then AVIF / JPEG XL |
+| `cprz-audio` | Opus; neural speech codecs later |
+| `cprz-video` | AV1 now, AV2 later |
+| `cprz-delta` | Increments against a previous version |
+| `cprz-pad` | Padmé size classes |
+
+### Never
+
+Does not encrypt, frame streams, or depend on a network stack. Does not train dictionaries on member plaintext; dictionaries use public data only. Does not implement its own compression algorithm; it wraps maintained libraries. Profile pictures remain outside the launch product. `cfrm` is not a compression service.
+
+### States
+
+Stateless: input becomes encoded and padded output or is refused; decode yields validated bytes or is refused; delta decompression takes the base version as explicit input.
+
+### Test obligations
+
+Codec round trips with identical vectors on native and WebAssembly targets. Bounded expansion and work; truncated, concatenated, trailing and unknown-codec input is refused. Deterministic public dictionaries; signing and encryption round trips prove signed bytes unchanged. Order is compress, then pad, then encrypt. Rust core on current stable; full line and branch coverage with real round trips and no mocks of own logic, including injected delay, duplication, loss, cancellation, clock regression, corruption and storage conflicts; bounded bytes, parsing, queues and work with errors omitting identifiers, plaintext and secrets; independent keys, transport identities, record locators, sessions and stores per community with nothing exported across communities.
 
 ## Layout
 
