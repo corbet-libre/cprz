@@ -8,11 +8,24 @@ The delta path compresses `new` with `old` as a raw-content zstd dictionary
 embedded). When that is not strictly smaller than `new` compressed on its own
 (unrelated data, empty `old`), the standalone encoding is stored instead. The
 first byte records the mode (`0x01` delta, `0x02` full), so every payload is
-self-describing and `apply` needs no side information. The checksum makes a
-delta applied against the wrong `old` fail instead of returning garbage.
+self-describing and `apply` needs no side information besides the `old`
+version the delta was built against. `MODE_FULL` ignores `old` entirely. For
+`MODE_DELTA`, `apply` decodes with `old` as the dictionary and fails on the
+embedded content checksum whenever the differing bytes change the output; a
+near-identical base whose differences the delta never references can still
+decode, because the checksum covers the decoded content, not the identity of
+the base.
 
-## Implementation survey
+## Scope / limits
 
+Native zstd sublibrary over finite plain bytes: `diff`/`apply` take in-memory
+slices and `apply` takes no limit parameter, so unlike the portable facade
+this API cannot enforce a decoded-size/work budget; callers needing enforced
+limits must use a bounded decoding path.
+
+## Implementation survey (historical, September 2026)
+
+Historical record, not a current runtime benchmark or wasm execution claim.
 Per the workspace rule to search before writing, the candidates evaluated
 (searched crates.io, GitHub and the docs in September 2026):
 
