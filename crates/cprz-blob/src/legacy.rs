@@ -58,6 +58,8 @@ pub enum Error {
     UnknownCodec(u8),
     /// The zstd layer failed.
     Zstd(std::io::Error),
+    /// The expanded output would exceed the caller's (or the default) limit.
+    OutputLimit,
 }
 
 impl std::fmt::Display for Error {
@@ -66,6 +68,7 @@ impl std::fmt::Display for Error {
             Error::Empty => write!(f, "empty packet"),
             Error::UnknownCodec(byte) => write!(f, "unknown codec header {byte:#04X}"),
             Error::Zstd(source) => write!(f, "zstd error: {source}"),
+            Error::OutputLimit => write!(f, "expanded output exceeds limit"),
         }
     }
 }
@@ -101,16 +104,41 @@ pub fn codec_of(packet: &[u8]) -> Result<Codec, Error> {
     Codec::from_byte(*header).ok_or(Error::UnknownCodec(*header))
 }
 
+/// Default cap on the expanded size of one packet (256 MiB).
+///
+/// A zstd frame can expand by several orders of magnitude, so decoding always
+/// runs under a limit. Use [`decompress_with_limit`] to choose another one.
+pub const DEFAULT_MAX_DECOMPRESSED_BYTES: usize = 256 * 1024 * 1024;
+
 /// Decompress a packet from [`compress`] back to its original bytes.
 ///
 /// Long-distance matching is an encoder-side setting stored in the frame, so
-/// decoding needs no extra configuration.
+/// decoding needs no extra configuration. The expanded output is limited to
+/// [`DEFAULT_MAX_DECOMPRESSED_BYTES`]; larger frames fail with
+/// [`Error::OutputLimit`].
 pub fn decompress(packet: &[u8]) -> Result<Vec<u8>, Error> {
+    decompress_with_limit(packet, DEFAULT_MAX_DECOMPRESSED_BYTES)
+}
+
+/// Decompress a packet, refusing output larger than `max_decoded_bytes`.
+///
+/// Output is read incrementally and never grows past the limit plus one byte,
+/// so a decompression bomb cannot exhaust memory.
+pub fn decompress_with_limit(packet: &[u8], max_decoded_bytes: usize) -> Result<Vec<u8>, Error> {
     match codec_of(packet)? {
         Codec::Zstd => {
-            let mut decoder = zstd::Decoder::new(&packet[1..]).map_err(Error::Zstd)?;
+            let decoder = zstd::Decoder::new(&packet[1..]).map_err(Error::Zstd)?;
+            let cap = u64::try_from(max_decoded_bytes)
+                .unwrap_or(u64::MAX)
+                .saturating_add(1);
             let mut output = Vec::new();
-            decoder.read_to_end(&mut output).map_err(Error::Zstd)?;
+            decoder
+                .take(cap)
+                .read_to_end(&mut output)
+                .map_err(Error::Zstd)?;
+            if output.len() > max_decoded_bytes {
+                return Err(Error::OutputLimit);
+            }
             Ok(output)
         }
     }

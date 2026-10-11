@@ -18,6 +18,12 @@ pub const QUALITY_MAX: f32 = 100.0;
 pub const SPEED_MIN: u8 = 1;
 /// Fastest encoder speed: worst compression, shortest encoding time.
 pub const SPEED_MAX: u8 = 10;
+/// Largest accepted input width or height in pixels.
+pub const MAX_INPUT_DIMENSION: u32 = 16_384;
+/// Largest accepted input area in pixels (100 megapixels).
+pub const MAX_INPUT_PIXELS: u64 = 100_000_000;
+/// Largest memory the decoder may allocate for one input (512 MiB).
+pub const MAX_DECODE_ALLOC_BYTES: u64 = 512 * 1024 * 1024;
 /// Number of quality probes used by [`encode_avif_to_size`].
 pub const TARGET_SIZE_STEPS: u32 = 8;
 
@@ -78,6 +84,14 @@ pub fn output_info(image: &AvifImage) -> OutputInfo {
 pub enum Error {
     /// The input bytes are not a decodable PNG, JPEG or WebP image.
     Decode(image::ImageError),
+    /// The input image is larger than [`MAX_INPUT_DIMENSION`] or
+    /// [`MAX_INPUT_PIXELS`] allow; it was refused before any pixel decoding.
+    TooLarge {
+        /// Declared width in pixels.
+        width: u32,
+        /// Declared height in pixels.
+        height: u32,
+    },
     /// AVIF encoding failed.
     Encode(String),
     /// Requested quality is outside 1..=100.
@@ -94,6 +108,12 @@ impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Error::Decode(error) => write!(f, "cannot decode input image: {error}"),
+            Error::TooLarge { width, height } => {
+                write!(
+                    f,
+                    "input image {width}x{height} exceeds the decoding limits"
+                )
+            }
             Error::Encode(detail) => write!(f, "cannot encode AVIF image: {detail}"),
             Error::InvalidQuality(quality) => {
                 write!(f, "quality {quality} is outside 1..=100")
@@ -262,9 +282,33 @@ fn check_speed(speed: u8) -> Result<u8, Error> {
     }
 }
 
+/// Decode PNG, JPEG or WebP bytes under explicit dimension, area and memory
+/// limits. The header is read first, so an oversized image is refused before
+/// any pixel buffer is allocated.
+fn decode_bounded(input: &[u8]) -> Result<image::DynamicImage, Error> {
+    use image::ImageDecoder;
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(input))
+        .with_guessed_format()
+        .map_err(|error| Error::Decode(image::ImageError::IoError(error)))?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(MAX_INPUT_DIMENSION);
+    limits.max_image_height = Some(MAX_INPUT_DIMENSION);
+    limits.max_alloc = Some(MAX_DECODE_ALLOC_BYTES);
+    reader.limits(limits);
+    let decoder = reader.into_decoder()?;
+    let (width, height) = decoder.dimensions();
+    if width > MAX_INPUT_DIMENSION
+        || height > MAX_INPUT_DIMENSION
+        || u64::from(width) * u64::from(height) > MAX_INPUT_PIXELS
+    {
+        return Err(Error::TooLarge { width, height });
+    }
+    Ok(image::DynamicImage::from_decoder(decoder)?)
+}
+
 /// Decode PNG, JPEG or WebP bytes and resize to fit `max_dim`, as RGBA pixels.
 fn decode_and_resize(input: &[u8], max_dim: u32) -> Result<(Vec<ravif::RGBA8>, u32, u32), Error> {
-    let decoded = image::load_from_memory(input)?;
+    let decoded = decode_bounded(input)?;
     let (width, height) = resized_dimensions(decoded.width(), decoded.height(), max_dim);
     let pixels = if (width, height) == (decoded.width(), decoded.height()) {
         decoded.to_rgba8()

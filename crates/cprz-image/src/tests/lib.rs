@@ -204,3 +204,71 @@ fn a_real_upstream_avif_refusal_preserves_its_diagnostic_through_conversion() {
     assert!(error.to_string().contains(&original));
     assert!(error.source().is_none());
 }
+
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = 0xffff_ffffu32;
+    for &byte in bytes {
+        crc ^= u32::from(byte);
+        for _ in 0..8 {
+            crc = if crc & 1 == 1 {
+                (crc >> 1) ^ 0xedb8_8320
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    !crc
+}
+
+fn png_chunk(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
+    let mut chunk = Vec::new();
+    chunk.extend_from_slice(&(data.len() as u32).to_be_bytes());
+    let mut body = kind.to_vec();
+    body.extend_from_slice(data);
+    chunk.extend_from_slice(&body);
+    chunk.extend_from_slice(&crc32(&body).to_be_bytes());
+    chunk
+}
+
+/// A PNG that declares `width` x `height` 8-bit grayscale pixels but carries
+/// no image data: the kind of header a decompression bomb would send.
+fn oversized_png_header(width: u32, height: u32) -> Vec<u8> {
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&width.to_be_bytes());
+    ihdr.extend_from_slice(&height.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 0, 0, 0, 0]);
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    png.extend(png_chunk(b"IHDR", &ihdr));
+    png.extend(png_chunk(b"IDAT", &[]));
+    png.extend(png_chunk(b"IEND", &[]));
+    png
+}
+
+#[test]
+fn oversized_dimensions_are_refused_before_decoding() {
+    for (width, height) in [(100_000, 100_000), (MAX_INPUT_DIMENSION + 1, 1)] {
+        let header = oversized_png_header(width, height);
+        assert!(encode_avif(&header, 64, 50.0, 10).is_err());
+        assert!(decode_bounded(&header).is_err());
+    }
+}
+
+#[test]
+fn oversized_pixel_area_is_refused_with_too_large() {
+    // 12_000 x 12_000 = 144 megapixels: each side is allowed, the area is not.
+    let header = oversized_png_header(12_000, 12_000);
+    assert!(matches!(
+        decode_bounded(&header),
+        Err(Error::TooLarge {
+            width: 12_000,
+            height: 12_000
+        })
+    ));
+}
+
+#[test]
+fn ordinary_images_still_decode() {
+    let input = encode_input(&gradient(32, 16), ImageFormat::Png);
+    let decoded = decode_bounded(&input).unwrap();
+    assert_eq!((decoded.width(), decoded.height()), (32, 16));
+}

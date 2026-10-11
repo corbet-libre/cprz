@@ -110,3 +110,28 @@ fn malformed_packet_diagnostics_preserve_codec_and_cause() {
         assert_eq!(error.source().is_some(), cause);
     }
 }
+
+#[test]
+fn decompression_bomb_is_refused_under_the_limit() {
+    // 8 MiB of zeros shrink to a few hundred bytes of zstd.
+    let bomb = compress(&vec![0u8; 8 * 1024 * 1024]).unwrap();
+    assert!(bomb.len() < 4096);
+    assert!(matches!(
+        decompress_with_limit(&bomb, 1024 * 1024),
+        Err(Error::OutputLimit)
+    ));
+    // The same packet expands when the limit allows it, and exactly at it.
+    let full = decompress_with_limit(&bomb, 8 * 1024 * 1024).unwrap();
+    assert_eq!(full.len(), 8 * 1024 * 1024);
+    assert!(matches!(
+        decompress_with_limit(&bomb, 8 * 1024 * 1024 - 1),
+        Err(Error::OutputLimit)
+    ));
+}
+
+#[test]
+fn default_limit_accepts_ordinary_payloads() {
+    let data = repetitive_blob();
+    let packet = compress(&data).unwrap();
+    assert_eq!(decompress(&packet).unwrap(), data);
+}

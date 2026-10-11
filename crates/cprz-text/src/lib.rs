@@ -85,6 +85,8 @@ pub enum Error {
     Brotli(std::io::Error),
     /// The decompressed bytes are not valid UTF-8.
     Utf8(std::string::FromUtf8Error),
+    /// The expanded output would exceed the caller's (or the default) limit.
+    OutputLimit,
 }
 
 impl std::fmt::Display for Error {
@@ -98,6 +100,7 @@ impl std::fmt::Display for Error {
             Error::Zstd(source) => write!(f, "zstd error: {source}"),
             Error::Brotli(source) => write!(f, "brotli error: {source}"),
             Error::Utf8(source) => write!(f, "decompressed bytes are not UTF-8: {source}"),
+            Error::OutputLimit => write!(f, "expanded output exceeds limit"),
         }
     }
 }
@@ -111,6 +114,9 @@ impl std::error::Error for Error {
         }
     }
 }
+
+/// Default cap on the expanded size of one text packet (64 MiB).
+pub const DEFAULT_MAX_DECOMPRESSED_BYTES: usize = 64 * 1024 * 1024;
 
 /// Highest zstd level this build supports (level 22 for the reference library).
 fn zstd_level() -> i32 {
@@ -126,19 +132,32 @@ fn encode_zstd(input: &[u8], dictionary: Option<&[u8]>) -> Result<Vec<u8>, Error
     encoder.compress(input).map_err(Error::Zstd)
 }
 
-fn decode_zstd(input: &[u8], dictionary: Option<&[u8]>) -> Result<Vec<u8>, Error> {
+/// Read `reader` to its end, failing when it yields more than `max` bytes.
+fn read_limited(
+    reader: impl Read,
+    max: usize,
+    wrap: fn(std::io::Error) -> Error,
+) -> Result<Vec<u8>, Error> {
+    let cap = u64::try_from(max).unwrap_or(u64::MAX).saturating_add(1);
     let mut output = Vec::new();
-    match dictionary {
-        Some(dict) => {
-            let mut decoder = zstd::Decoder::with_dictionary(input, dict).map_err(Error::Zstd)?;
-            decoder.read_to_end(&mut output).map_err(Error::Zstd)?;
-        }
-        None => {
-            let mut decoder = zstd::Decoder::new(input).map_err(Error::Zstd)?;
-            decoder.read_to_end(&mut output).map_err(Error::Zstd)?;
-        }
+    reader.take(cap).read_to_end(&mut output).map_err(wrap)?;
+    if output.len() > max {
+        return Err(Error::OutputLimit);
     }
     Ok(output)
+}
+
+fn decode_zstd(input: &[u8], dictionary: Option<&[u8]>, max: usize) -> Result<Vec<u8>, Error> {
+    match dictionary {
+        Some(dict) => {
+            let decoder = zstd::Decoder::with_dictionary(input, dict).map_err(Error::Zstd)?;
+            read_limited(decoder, max, Error::Zstd)
+        }
+        None => {
+            let decoder = zstd::Decoder::new(input).map_err(Error::Zstd)?;
+            read_limited(decoder, max, Error::Zstd)
+        }
+    }
 }
 
 fn encode_brotli(input: &[u8]) -> Result<Vec<u8>, Error> {
@@ -149,11 +168,9 @@ fn encode_brotli(input: &[u8]) -> Result<Vec<u8>, Error> {
     Ok(writer.into_inner())
 }
 
-fn decode_brotli(input: &[u8]) -> Result<Vec<u8>, Error> {
-    let mut reader = brotli::Decompressor::new(input, BROTLI_BUFFER_SIZE);
-    let mut output = Vec::new();
-    reader.read_to_end(&mut output).map_err(Error::Brotli)?;
-    Ok(output)
+fn decode_brotli(input: &[u8], max: usize) -> Result<Vec<u8>, Error> {
+    let reader = brotli::Decompressor::new(input, BROTLI_BUFFER_SIZE);
+    read_limited(reader, max, Error::Brotli)
 }
 
 /// Compress UTF-8 text to the smallest output of zstd and Brotli.
@@ -196,17 +213,29 @@ pub fn codec_of(packet: &[u8]) -> Result<Codec, Error> {
 /// Pass the same `dictionary` that compression used when the header records a
 /// dictionary frame; it is ignored for plain zstd and Brotli frames.
 pub fn decompress(packet: &[u8], dictionary: Option<&[u8]>) -> Result<String, Error> {
+    decompress_with_limit(packet, dictionary, DEFAULT_MAX_DECOMPRESSED_BYTES)
+}
+
+/// Like [`decompress`], refusing output larger than `max_decoded_bytes`.
+///
+/// Output is read incrementally and never grows past the limit plus one byte,
+/// so a decompression bomb cannot exhaust memory.
+pub fn decompress_with_limit(
+    packet: &[u8],
+    dictionary: Option<&[u8]>,
+    max_decoded_bytes: usize,
+) -> Result<String, Error> {
     let codec = codec_of(packet)?;
     let body = &packet[1..];
     let bytes = match codec {
-        Codec::Zstd => decode_zstd(body, None)?,
+        Codec::Zstd => decode_zstd(body, None, max_decoded_bytes)?,
         Codec::ZstdDict => {
             let dict = dictionary
                 .filter(|dict| !dict.is_empty())
                 .ok_or(Error::MissingDictionary)?;
-            decode_zstd(body, Some(dict))?
+            decode_zstd(body, Some(dict), max_decoded_bytes)?
         }
-        Codec::Brotli => decode_brotli(body)?,
+        Codec::Brotli => decode_brotli(body, max_decoded_bytes)?,
     };
     String::from_utf8(bytes).map_err(Error::Utf8)
 }

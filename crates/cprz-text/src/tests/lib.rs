@@ -208,3 +208,46 @@ fn control_character_text_uses_the_smallest_real_frame_and_round_trips() {
         }
     }
 }
+
+#[test]
+fn zstd_bomb_is_refused_under_the_limit() {
+    let bomb = [
+        &[Codec::Zstd.as_byte()][..],
+        &encode_zstd(&vec![b'a'; 8 << 20], None).unwrap(),
+    ]
+    .concat();
+    assert!(bomb.len() < 4096);
+    assert!(matches!(
+        decompress_with_limit(&bomb, None, 1 << 20),
+        Err(Error::OutputLimit)
+    ));
+    assert_eq!(
+        decompress_with_limit(&bomb, None, 8 << 20).unwrap().len(),
+        8 << 20
+    );
+}
+
+#[test]
+fn brotli_bomb_is_refused_under_the_limit() {
+    let bomb = [
+        &[Codec::Brotli.as_byte()][..],
+        &encode_brotli(&vec![b'a'; 8 << 20]).unwrap(),
+    ]
+    .concat();
+    assert!(bomb.len() < 65_536);
+    assert!(matches!(
+        decompress_with_limit(&bomb, None, 1 << 20),
+        Err(Error::OutputLimit)
+    ));
+    assert_eq!(
+        decompress_with_limit(&bomb, None, 8 << 20).unwrap().len(),
+        8 << 20
+    );
+}
+
+#[test]
+fn default_limit_accepts_ordinary_text() {
+    let text = long_text();
+    let packet = compress(&text, None).unwrap();
+    assert_eq!(decompress(&packet, None).unwrap(), text);
+}
