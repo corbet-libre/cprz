@@ -40,7 +40,7 @@ class. `expand` sniffs the magic first (a padded buffer starts with a zero
 length prefix, never with the magic) and unpads otherwise, so the padding
 flag is informational: decoding never needs side information.
 
-## Prior-art survey (required by workspace AGENTS.md)
+## Prior-art survey (required)
 
 Searched crates.io, GitHub and the literature in September 2026, once for the
 codecs (nothing new to wrap: every payload kind delegates to its sub-crate,

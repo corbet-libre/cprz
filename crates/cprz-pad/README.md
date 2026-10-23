@@ -10,7 +10,7 @@ sensitive data. Overhead is at most about 12% in Padmé mode once the
 header is amortised (lengths of 256 bytes and up; verified by tests up to
 100000).
 
-## Prior-art search (required by workspace AGENTS.md)
+## Prior-art search (required)
 
 | Candidate | Result | Verdict |
 |---|---|---|
