@@ -20,7 +20,7 @@ Write all code comments and documentation in English.
 - `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
   `cargo test --workspace` and `cargo check --workspace --target wasm32-unknown-unknown`
   must pass before every merge.
-- Do not build on the workstation. Push and let GitHub Actions run the checks; read the
+- Do not build locally. Push and let GitHub Actions run the checks; read the
   results with `gh run list` / `gh run view --log-failed`. Crow is the fallback only when
   Actions is unavailable.
 - Tests use real data round trips and size assertions, not mocks.
