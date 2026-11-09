@@ -25,7 +25,7 @@ cargo check --locked -p cprz --no-default-features --target wasm32-unknown-unkno
 # enforced, exactly as CI does.
 version=$(python3 -c 'import tomllib; print(next(p["version"] for p in tomllib.load(open("Cargo.lock", "rb"))["package"] if p["name"] == "wasm-bindgen"))')
 archive="wasm-bindgen-${version}-x86_64-unknown-linux-musl.tar.gz"
-base="https://github.com/wasm-bindgen/wasm-bindgen/releases/download/${version}"
+base="${WASM_BINDGEN_DOWNLOAD_BASE:-https://github.com/wasm-bindgen/wasm-bindgen/releases/download}/${version}"
 mkdir -p "$RUNNER_TEMP/cprz-wasm-runner"
 cd "$RUNNER_TEMP/cprz-wasm-runner"
 curl --user-agent dependency-ci --fail --location --retry 3 --remote-name "$base/$archive"
